@@ -308,3 +308,8 @@ function ap_plants_archive_shortcode($atts) {
   
   return ob_get_clean();
 }
+
+
+// Getting the individual record and all the fields of the plant.
+
+// todo: on clicking the card in the shortcode html grid, render a new page with all the plant details.
