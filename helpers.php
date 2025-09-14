@@ -131,3 +131,164 @@ function ap_is_assoc(array $arr): bool {
   
   return array_keys($arr) !== range(0, count($arr) - 1);
 }
+
+/**
+ * Detect field type based on field name and value
+ * 
+ * @param string $field_name Field name
+ * @param mixed $value Field value
+ * @return string Field type
+ */
+function ap_detect_field_type($field_name, $value) {
+  // Check for image fields
+  if (strpos(strtolower($field_name), 'image') !== false || 
+      strpos(strtolower($field_name), 'photo') !== false ||
+      strpos(strtolower($field_name), 'picture') !== false) {
+    return 'image';
+  }
+  
+  // Check for audio fields
+  if (strpos(strtolower($field_name), 'audio') !== false || 
+      strpos(strtolower($field_name), 'sound') !== false ||
+      strpos(strtolower($field_name), 'mp3') !== false) {
+    return 'audio';
+  }
+  
+  // Check if value is attachment array
+  if (is_array($value) && !empty($value)) {
+    $first_item = is_array($value) && !ap_is_assoc($value) ? $value[0] : $value;
+    if (is_array($first_item) && isset($first_item['url'])) {
+      // Check if it's audio or image based on type
+      if (isset($first_item['type'])) {
+        if (strpos($first_item['type'], 'audio') !== false) {
+          return 'audio';
+        } elseif (strpos($first_item['type'], 'image') !== false) {
+          return 'image';
+        }
+      }
+      return 'attachment';
+    }
+  }
+  
+  // Check for date fields
+  if (strpos(strtolower($field_name), 'date') !== false || 
+      strpos(strtolower($field_name), 'time') !== false ||
+      strpos(strtolower($field_name), 'modified') !== false ||
+      strpos(strtolower($field_name), 'created') !== false) {
+    return 'date';
+  }
+  
+  // Default to text
+  return 'text';
+}
+
+/**
+ * Format field value based on field type
+ * 
+ * @param string $field_name Field name
+ * @param mixed $value Field value
+ * @param string $format Output format ('html', 'text', 'url')
+ * @return string Formatted value
+ */
+function ap_format_field_value($field_name, $value, $format = 'html') {
+  if (empty($value)) {
+    return '';
+  }
+  
+  $field_type = ap_detect_field_type($field_name, $value);
+  
+  switch ($field_type) {
+    case 'image':
+      if (is_array($value)) {
+        $attachments = ap_norm_attachments($value);
+        if (empty($attachments)) {
+          return '';
+        }
+        
+        if ($format === 'url') {
+          return $attachments[0]['url'];
+        }
+        
+        $img = $attachments[0];
+        $alt = $field_name;
+        return '<img src="' . esc_url($img['url']) . '" alt="' . esc_attr($alt) . '" class="plant-image">';
+      }
+      return '';
+      
+    case 'audio':
+      if (is_array($value)) {
+        $attachments = ap_norm_attachments($value);
+        if (empty($attachments)) {
+          return '';
+        }
+        
+        if ($format === 'url') {
+          return $attachments[0]['url'];
+        }
+        
+        $audio = $attachments[0];
+        return '<audio controls class="plant-audio"><source src="' . esc_url($audio['url']) . '" type="audio/mpeg">Your browser does not support the audio element.</audio>';
+      }
+      return '';
+      
+    case 'date':
+      if (is_string($value)) {
+        $timestamp = strtotime($value);
+        if ($timestamp !== false) {
+          if ($format === 'text') {
+            return date('F j, Y', $timestamp);
+          }
+          return '<time datetime="' . esc_attr($value) . '" class="plant-date">' . esc_html(date('F j, Y', $timestamp)) . '</time>';
+        }
+      }
+      return esc_html($value);
+      
+    case 'text':
+    default:
+      if (is_array($value)) {
+        return esc_html(implode(', ', $value));
+      }
+      return esc_html($value);
+  }
+}
+
+/**
+ * Get all images from a field (handles both single and multiple images)
+ * 
+ * @param mixed $value Field value
+ * @return array Array of normalized attachments
+ */
+function ap_get_field_images($value) {
+  if (empty($value)) {
+    return [];
+  }
+  
+  if (is_array($value)) {
+    return ap_norm_attachments($value);
+  }
+  
+  return [];
+}
+
+/**
+ * Get all audio files from a field
+ * 
+ * @param mixed $value Field value
+ * @return array Array of audio attachments
+ */
+function ap_get_field_audio($value) {
+  if (empty($value)) {
+    return [];
+  }
+  
+  $attachments = ap_norm_attachments($value);
+  $audio_files = [];
+  
+  foreach ($attachments as $attachment) {
+    if (isset($attachment['type']) && strpos($attachment['type'], 'audio') !== false) {
+      $audio_files[] = $attachment;
+    }
+  }
+  
+  return $audio_files;
+}

@@ -3,6 +3,32 @@
  * Plugin Name: Airtable Proxy API
  * Description: shortcodes for Elementor, backed by Airtable.
  * Version: 0.1.0
+ * 
+ * Available Shortcodes:
+ * 
+ * ARCHIVE:
+ * - [plants_archive] - Display grid of plant cards with pagination and filtering
+ * 
+ * GENERAL FIELD SHORTCODES:
+ * - [plant_field field="Plant Name (English)"] - Display any field with auto type detection
+ * - [plant_image field="feature image"] - Display single image as <img> tag
+ * - [plant_audio field="field_name"] - Display audio as <audio> tag
+ * - [plant_images field="additional images"] - Display multiple images
+ * - [plant_gallery field="additional images" columns="3"] - Display images in gallery grid
+ * 
+ * SPECIFIC FIELD SHORTCODES (convenience):
+ * - [plant_name_en] - Plant English name
+ * - [plant_name_latin] - Plant Latin name  
+ * - [plant_name_halq] - Plant Halq'eméylem name and meaning
+ * - [plant_origin] - Indigenous or Introduced/Niche or Zone
+ * - [plant_uses] - Uses (Food, medicine, other uses)
+ * - [plant_ecology] - Niche/Zone and Ecology
+ * - [plant_feature_image] - Feature image
+ * - [plant_additional_images] - Additional images
+ * - [plant_last_modified] - Last Modified date
+ * 
+ * All shortcodes get plant ID from URL parameter 'id' if not specified.
+ * Plant cards in the archive are clickable and navigate to same page with ?id=RECORD_ID
  */
 if (!defined('ABSPATH')) exit;
 
@@ -11,6 +37,24 @@ require_once plugin_dir_path(__FILE__) . 'helpers.php';
 
 add_action('init', function () {
   add_shortcode('plants_archive', 'ap_plants_archive_shortcode');
+  
+  // Individual field shortcodes
+  add_shortcode('plant_field', 'ap_plant_field_shortcode');
+  add_shortcode('plant_image', 'ap_plant_image_shortcode');
+  add_shortcode('plant_audio', 'ap_plant_audio_shortcode');
+  add_shortcode('plant_images', 'ap_plant_images_shortcode');
+  add_shortcode('plant_gallery', 'ap_plant_gallery_shortcode');
+  
+  // Specific field shortcodes for convenience
+  add_shortcode('plant_name_en', 'ap_plant_name_en_shortcode');
+  add_shortcode('plant_name_latin', 'ap_plant_name_latin_shortcode');
+  add_shortcode('plant_name_halq', 'ap_plant_name_halq_shortcode');
+  add_shortcode('plant_origin', 'ap_plant_origin_shortcode');
+  add_shortcode('plant_uses', 'ap_plant_uses_shortcode');
+  add_shortcode('plant_ecology', 'ap_plant_ecology_shortcode');
+  add_shortcode('plant_feature_image', 'ap_plant_feature_image_shortcode');
+  add_shortcode('plant_additional_images', 'ap_plant_additional_images_shortcode');
+  add_shortcode('plant_last_modified', 'ap_plant_last_modified_shortcode');
 });
 
 
@@ -237,10 +281,34 @@ function ap_plants_archive_shortcode($atts) {
   
   // Render plant cards
   if (!empty($result['plants'])) {
+    // Add CSS for hover effects
+    echo '<style>
+      .plant-card-link:hover .plant-card {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+      }
+      .plant-card-link {
+        display: block;
+      }
+    </style>';
+    
     echo '<div class="plants-archive" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; margin: 20px 0;">';
     
     foreach ($result['plants'] as $plant) {
-      echo '<div class="plant-card" style="border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: #fff;">';
+      // Create plant detail page URL with record ID
+      $detail_page_slug = 'plant-details'; // Your actual page slug
+      $detail_page = get_page_by_path($detail_page_slug);
+      
+      if ($detail_page) {
+        // Link to separate detail page
+        $plant_url = add_query_arg(['id' => $plant['id']], get_permalink($detail_page->ID));
+      } else {
+        // Fallback to same page if detail page not found
+        $plant_url = add_query_arg(['id' => $plant['id']], get_permalink());
+      }
+      
+      echo '<a href="' . esc_url($plant_url) . '" class="plant-card-link" style="text-decoration: none; color: inherit;">';
+      echo '<div class="plant-card" style="border: 1px solid #ddd; border-radius: 8px; padding: 15px; background: #fff; cursor: pointer; transition: box-shadow 0.2s ease;">';
       
       // Feature image
       if ($plant['feature_image']) {
@@ -274,7 +342,11 @@ function ap_plants_archive_shortcode($atts) {
         echo '</div>';
       }
       
+      // Hidden record ID for debugging/development
+      echo '<div style="display: none;" class="plant-record-id">' . esc_html($plant['id']) . '</div>';
+      
       echo '</div>';
+      echo '</a>';
     }
     
     echo '</div>';
@@ -310,6 +382,385 @@ function ap_plants_archive_shortcode($atts) {
 }
 
 
-// Getting the individual record and all the fields of the plant.
+/**
+ * Fetch individual plant record by ID
+ * 
+ * @param string $id Plant record ID
+ * @param string $attachments How to handle attachments ('url' for URL strings, 'object' for full objects)
+ * @return array|WP_Error Plant data or error
+ */
+function ap_fetch_plant_by_id($id, $attachments = 'url') {
+  if (empty($id)) {
+    return new WP_Error('invalid_id', 'Plant ID is required');
+  }
+  
+  // Build request parameters
+  $params = [
+    'pageSize' => 1,
+    'offset' => '',
+    'filterByFormula' => "RECORD_ID() = '{$id}'"
+  ];
+  
+  // Make the Airtable request
+  $airtable_response = ap_airtable_request($params);
+  
+  // Handle errors
+  if (is_wp_error($airtable_response)) {
+    return $airtable_response;
+  }
+  
+  // Check if record found
+  if (empty($airtable_response['records']) || !is_array($airtable_response['records'])) {
+    return new WP_Error('plant_not_found', 'Plant record not found');
+  }
+  
+  $record = $airtable_response['records'][0];
+  if (!isset($record['fields'])) {
+    return new WP_Error('invalid_record', 'Invalid plant record');
+  }
+  
+  $mapped_fields = ap_map_fields($record['fields']);
+  
+  // Process attachments based on requested format
+  if ($attachments === 'object') {
+    // Return full attachment objects
+    if (isset($mapped_fields['feature_image'])) {
+      $mapped_fields['feature_image'] = ap_norm_attachments($mapped_fields['feature_image']);
+    }
+    if (isset($mapped_fields['soundbite_halq'])) {
+      $mapped_fields['soundbite_halq'] = ap_norm_attachments($mapped_fields['soundbite_halq']);
+    }
+  } else {
+    // Return URL strings (default)
+    if (isset($mapped_fields['feature_image'])) {
+      $feature_images = ap_norm_attachments($mapped_fields['feature_image']);
+      $mapped_fields['feature_image'] = !empty($feature_images) ? $feature_images[0]['url'] : null;
+    }
+    if (isset($mapped_fields['soundbite_halq'])) {
+      $soundbites = ap_norm_attachments($mapped_fields['soundbite_halq']);
+      $mapped_fields['soundbite_halq'] = !empty($soundbites) ? $soundbites[0]['url'] : null;
+    }
+  }
+  
+  // Add record ID
+  $mapped_fields['id'] = $record['id'];
+  
+  return $mapped_fields;
+}
 
-// todo: on clicking the card in the shortcode html grid, render a new page with all the plant details.
+/**
+ * Fetch plant record with caching (once per request + optional WP cache)
+ * 
+ * @param string $id Plant record ID
+ * @param string $attachments How to handle attachments
+ * @return array|WP_Error Plant data or error
+ */
+function ap_get_plant_cached($id, $attachments = 'url') {
+  static $mem = []; // request-level memory
+  $key = $id . '|' . $attachments;
+
+  if (isset($mem[$key])) {
+    return $mem[$key];
+  }
+
+  // Optional: cross-request cache (60s). Safe because Airtable attachment URLs rotate.
+  $cached = wp_cache_get($key, 'ap_plants');
+  if ($cached !== false) {
+    $mem[$key] = $cached;
+    return $cached;
+  }
+
+  $plant = ap_fetch_plant_by_id($id, $attachments);
+  if (!is_wp_error($plant)) {
+    $mem[$key] = $plant;
+    wp_cache_set($key, $plant, 'ap_plants', 60); // 60s TTL
+  }
+  
+  return $plant;
+}
+
+/**
+ * Plant field shortcode - displays any field with automatic type detection
+ * 
+ * Usage: [plant_field field="Plant Name (English)" id="rec123"] or [plant_field field="Plant Name (English)"] (gets id from URL)
+ * 
+ * @param array $atts Shortcode attributes
+ * @return string Field value or empty string
+ */
+function ap_plant_field_shortcode($atts) {
+  $a = shortcode_atts([
+    'id' => '',
+    'field' => '',
+    'default' => '',
+    'format' => 'html', // html, text, url
+    'attachments' => 'url'
+  ], $atts);
+  
+  $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
+  if (!$id || !$a['field']) {
+    return esc_html($a['default']);
+  }
+
+  $plant = ap_get_plant_cached($id, $a['attachments']);
+  if (is_wp_error($plant)) {
+    return esc_html($a['default']);
+  }
+
+  $val = $plant[$a['field']] ?? $a['default'];
+  if (empty($val)) {
+    return esc_html($a['default']);
+  }
+
+  return ap_format_field_value($a['field'], $val, $a['format']);
+}
+
+/**
+ * Plant image shortcode - displays image fields as <img> tags
+ * 
+ * Usage: [plant_image field="feature_image" id="rec123"] or [plant_image field="feature_image"] (gets id from URL)
+ * 
+ * @param array $atts Shortcode attributes
+ * @return string Image HTML or empty string
+ */
+function ap_plant_image_shortcode($atts) {
+  $a = shortcode_atts([
+    'id' => '',
+    'field' => 'feature_image',
+    'class' => '',
+    'alt' => '',
+    'attachments' => 'url'
+  ], $atts);
+  
+  $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
+  if (!$id) {
+    return '';
+  }
+
+  $plant = ap_get_plant_cached($id, $a['attachments']);
+  if (is_wp_error($plant)) {
+    return '';
+  }
+
+  $val = $plant[$a['field']] ?? '';
+  $url = is_array($val) ? ($val['url'] ?? '') : $val;
+  if (!$url) {
+    return '';
+  }
+
+  $alt = $a['alt'] ?: ($plant['name_en'] ?? '');
+  return '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="' . esc_attr($a['class']) . '">';
+}
+
+/**
+ * Plant audio shortcode - displays audio fields as <audio> tags
+ * 
+ * Usage: [plant_audio field="soundbite_halq" id="rec123"] or [plant_audio field="soundbite_halq"] (gets id from URL)
+ * 
+ * @param array $atts Shortcode attributes
+ * @return string Audio HTML or empty string
+ */
+function ap_plant_audio_shortcode($atts) {
+  $a = shortcode_atts([
+    'id' => '',
+    'field' => 'soundbite_halq',
+    'class' => '',
+    'controls' => 'true',
+    'attachments' => 'url'
+  ], $atts);
+  
+  $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
+  if (!$id) {
+    return '';
+  }
+
+  $plant = ap_get_plant_cached($id, $a['attachments']);
+  if (is_wp_error($plant)) {
+    return '';
+  }
+
+  $val = $plant[$a['field']] ?? '';
+  $url = is_array($val) ? ($val['url'] ?? '') : $val;
+  if (!$url) {
+    return '';
+  }
+
+  $controls = $a['controls'] === 'true' ? ' controls' : '';
+  $class = !empty($a['class']) ? ' class="' . esc_attr($a['class']) . '"' : '';
+  
+  return '<audio' . $class . $controls . '><source src="' . esc_url($url) . '" type="audio/mpeg">Your browser does not support the audio element.</audio>';
+}
+
+/**
+ * Plant images shortcode - displays multiple images
+ * 
+ * Usage: [plant_images field="additional images" id="rec123"]
+ * 
+ * @param array $atts Shortcode attributes
+ * @return string Images HTML or empty string
+ */
+function ap_plant_images_shortcode($atts) {
+  $a = shortcode_atts([
+    'id' => '',
+    'field' => 'additional images',
+    'class' => '',
+    'size' => 'large', // small, large, full
+    'attachments' => 'url'
+  ], $atts);
+  
+  $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
+  if (!$id) {
+    return '';
+  }
+
+  $plant = ap_get_plant_cached($id, $a['attachments']);
+  if (is_wp_error($plant)) {
+    return '';
+  }
+
+  $val = $plant[$a['field']] ?? '';
+  $images = ap_get_field_images($val);
+  if (empty($images)) {
+    return '';
+  }
+
+  $output = '<div class="plant-images ' . esc_attr($a['class']) . '">';
+  foreach ($images as $image) {
+    $url = $image['url'];
+    if ($a['size'] !== 'original' && isset($image['thumbnails'][$a['size']])) {
+      $url = $image['thumbnails'][$a['size']]['url'];
+    }
+    
+    $alt = $image['filename'] ?? $a['field'];
+    $output .= '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="plant-image">';
+  }
+  $output .= '</div>';
+  
+  return $output;
+}
+
+/**
+ * Plant gallery shortcode - displays images in a gallery format
+ * 
+ * Usage: [plant_gallery field="additional images" id="rec123"]
+ * 
+ * @param array $atts Shortcode attributes
+ * @return string Gallery HTML or empty string
+ */
+function ap_plant_gallery_shortcode($atts) {
+  $a = shortcode_atts([
+    'id' => '',
+    'field' => 'additional images',
+    'class' => '',
+    'columns' => 3,
+    'size' => 'large',
+    'attachments' => 'url'
+  ], $atts);
+  
+  $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
+  if (!$id) {
+    return '';
+  }
+
+  $plant = ap_get_plant_cached($id, $a['attachments']);
+  if (is_wp_error($plant)) {
+    return '';
+  }
+
+  $val = $plant[$a['field']] ?? '';
+  $images = ap_get_field_images($val);
+  if (empty($images)) {
+    return '';
+  }
+
+  $columns = max(1, min(6, (int)$a['columns']));
+  $output = '<div class="plant-gallery ' . esc_attr($a['class']) . '" style="display: grid; grid-template-columns: repeat(' . $columns . ', 1fr); gap: 10px;">';
+  
+  foreach ($images as $image) {
+    $url = $image['url'];
+    if ($a['size'] !== 'original' && isset($image['thumbnails'][$a['size']])) {
+      $url = $image['thumbnails'][$a['size']]['url'];
+    }
+    
+    $alt = $image['filename'] ?? $a['field'];
+    $output .= '<div class="gallery-item">';
+    $output .= '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="plant-gallery-image" style="width: 100%; height: auto; border-radius: 4px;">';
+    $output .= '</div>';
+  }
+  $output .= '</div>';
+  
+  return $output;
+}
+
+// Specific field shortcodes for convenience
+
+/**
+ * Plant English name shortcode
+ */
+function ap_plant_name_en_shortcode($atts) {
+  $atts['field'] = 'Plant Name (English)';
+  return ap_plant_field_shortcode($atts);
+}
+
+/**
+ * Plant Latin name shortcode
+ */
+function ap_plant_name_latin_shortcode($atts) {
+  $atts['field'] = 'Plant Name (Latin)';
+  return ap_plant_field_shortcode($atts);
+}
+
+/**
+ * Plant Halq'eméylem name shortcode
+ */
+function ap_plant_name_halq_shortcode($atts) {
+  $atts['field'] = 'Plant Name (Halq\'eméylem) and Meaning';
+  return ap_plant_field_shortcode($atts);
+}
+
+/**
+ * Plant origin shortcode
+ */
+function ap_plant_origin_shortcode($atts) {
+  $atts['field'] = 'Indigenous or Introduced/Niche or Zone';
+  return ap_plant_field_shortcode($atts);
+}
+
+/**
+ * Plant uses shortcode
+ */
+function ap_plant_uses_shortcode($atts) {
+  $atts['field'] = 'Uses (Food, medicine, other uses)';
+  return ap_plant_field_shortcode($atts);
+}
+
+/**
+ * Plant ecology shortcode
+ */
+function ap_plant_ecology_shortcode($atts) {
+  $atts['field'] = 'Niche/Zone and Ecology';
+  return ap_plant_field_shortcode($atts);
+}
+
+/**
+ * Plant feature image shortcode
+ */
+function ap_plant_feature_image_shortcode($atts) {
+  $atts['field'] = 'feature image';
+  return ap_plant_image_shortcode($atts);
+}
+
+/**
+ * Plant additional images shortcode
+ */
+function ap_plant_additional_images_shortcode($atts) {
+  $atts['field'] = 'additional images';
+  return ap_plant_images_shortcode($atts);
+}
+
+/**
+ * Plant last modified shortcode
+ */
+function ap_plant_last_modified_shortcode($atts) {
+  $atts['field'] = 'Last Modified';
+  return ap_plant_field_shortcode($atts);
+}
