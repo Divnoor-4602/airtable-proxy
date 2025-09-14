@@ -20,10 +20,10 @@
  * 
  * GENERAL FIELD SHORTCODES:
  * - [plant_field field="Plant Name (English)"] - Display any field with auto type detection
- * - [plant_image field="feature image"] - Display single image as <img> tag
+ * - [plant_image field="feature image" max_width="400px"] - Display single image as <img> tag
  * - [plant_audio field="field_name"] - Display audio as <audio> tag
- * - [plant_images field="additional images"] - Display multiple images
- * - [plant_gallery field="additional images" columns="3"] - Display images in gallery grid
+ * - [plant_images field="additional images" max_width="300px"] - Display multiple images in responsive grid
+ * - [plant_gallery field="additional images" columns="3" max_height="200px"] - Display images in gallery grid
  * 
  * SPECIFIC FIELD SHORTCODES (convenience):
  * - [plant_name_en] - Plant English name
@@ -549,7 +549,9 @@ function ap_plant_image_shortcode($atts) {
     'field' => 'feature_image',
     'class' => '',
     'alt' => '',
-    'attachments' => 'url'
+    'attachments' => 'url',
+    'size' => 'medium', // small, medium, large, full
+    'max_width' => '400px'
   ], $atts);
   
   $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
@@ -569,7 +571,11 @@ function ap_plant_image_shortcode($atts) {
   }
 
   $alt = $a['alt'] ?: ($plant['name_en'] ?? '');
-  return '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="' . esc_attr($a['class']) . '">';
+  
+  // Build style attributes for responsive sizing
+  $style = 'max-width: ' . esc_attr($a['max_width']) . '; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);';
+  
+  return '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="' . esc_attr($a['class']) . '" style="' . $style . '">';
 }
 
 /**
@@ -624,8 +630,10 @@ function ap_plant_images_shortcode($atts) {
     'id' => '',
     'field' => 'additional images',
     'class' => '',
-    'size' => 'large', // small, large, full
-    'attachments' => 'url'
+    'size' => 'medium', // small, medium, large, full
+    'attachments' => 'url',
+    'max_width' => '300px',
+    'columns' => '3' // Number of columns for grid layout
   ], $atts);
   
   $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
@@ -644,7 +652,12 @@ function ap_plant_images_shortcode($atts) {
     return '';
   }
 
-  $output = '<div class="plant-images ' . esc_attr($a['class']) . '">';
+  // Build responsive grid CSS
+  $grid_style = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0;';
+  $image_style = 'max-width: ' . esc_attr($a['max_width']) . '; width: 100%; height: auto; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); transition: transform 0.2s ease;';
+  $image_style .= ' object-fit: cover;';
+
+  $output = '<div class="plant-images ' . esc_attr($a['class']) . '" style="' . $grid_style . '">';
   foreach ($images as $image) {
     $url = $image['url'];
     if ($a['size'] !== 'original' && isset($image['thumbnails'][$a['size']])) {
@@ -652,7 +665,7 @@ function ap_plant_images_shortcode($atts) {
     }
     
     $alt = $image['filename'] ?? $a['field'];
-    $output .= '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="plant-image">';
+    $output .= '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="plant-image" style="' . $image_style . '">';
   }
   $output .= '</div>';
   
@@ -673,8 +686,9 @@ function ap_plant_gallery_shortcode($atts) {
     'field' => 'additional images',
     'class' => '',
     'columns' => 3,
-    'size' => 'large',
-    'attachments' => 'url'
+    'size' => 'medium',
+    'attachments' => 'url',
+    'max_height' => '200px'
   ], $atts);
   
   $id = $a['id'] ?: sanitize_text_field($_GET['id'] ?? '');
@@ -694,7 +708,10 @@ function ap_plant_gallery_shortcode($atts) {
   }
 
   $columns = max(1, min(6, (int)$a['columns']));
-  $output = '<div class="plant-gallery ' . esc_attr($a['class']) . '" style="display: grid; grid-template-columns: repeat(' . $columns . ', 1fr); gap: 10px;">';
+  $grid_style = 'display: grid; grid-template-columns: repeat(' . $columns . ', 1fr); gap: 15px; margin: 20px 0;';
+  $image_style = 'width: 100%; height: auto; max-height: ' . esc_attr($a['max_height']) . '; object-fit: cover; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); transition: transform 0.2s ease;';
+  
+  $output = '<div class="plant-gallery ' . esc_attr($a['class']) . '" style="' . $grid_style . '">';
   
   foreach ($images as $image) {
     $url = $image['url'];
@@ -703,8 +720,8 @@ function ap_plant_gallery_shortcode($atts) {
     }
     
     $alt = $image['filename'] ?? $a['field'];
-    $output .= '<div class="gallery-item">';
-    $output .= '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="plant-gallery-image" style="width: 100%; height: auto; border-radius: 4px;">';
+    $output .= '<div class="gallery-item" style="overflow: hidden; border-radius: 6px;">';
+    $output .= '<img src="' . esc_url($url) . '" alt="' . esc_attr($alt) . '" class="plant-gallery-image" style="' . $image_style . '">';
     $output .= '</div>';
   }
   $output .= '</div>';

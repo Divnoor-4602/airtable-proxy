@@ -211,7 +211,8 @@ function ap_format_field_value($field_name, $value, $format = 'html') {
         
         $img = $attachments[0];
         $alt = $field_name;
-        return '<img src="' . esc_url($img['url']) . '" alt="' . esc_attr($alt) . '" class="plant-image">';
+        $style = 'max-width: 400px; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);';
+        return '<img src="' . esc_url($img['url']) . '" alt="' . esc_attr($alt) . '" class="plant-image" style="' . $style . '">';
       }
       return '';
       
